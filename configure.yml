@@ -1,0 +1,18 @@
+###########################
+# Input Source Parameters #
+###########################
+
+# Set this 0 to use camera as input (try 1/2/3 if 0 fails)
+# Set this to video path to use video as input
+
+video_source: 0
+# video_source: 'tests/Test4.mp4'
+
+window_name: "UmboCV Demo"
+
+###################################
+# Writing Video Output parameters #
+###################################
+
+# Set this True to write video output to outputs/
+write_video_output: False

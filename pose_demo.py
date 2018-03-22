@@ -1,18 +1,30 @@
 import cv2
-import numpy as np
 import time
-from JH_pose_demo import *
-
+import demo_library as demo_lib
 import threading
 import logging
 from Queue import Queue, Empty
+import yaml
+
+###################
+# User Parameters #
+###################
+# Set up user parameters
+with open("./configure.yml", 'r') as stream:
+    user_parameters = yaml.load(stream)
+
+VIDEO_SOURCE = user_parameters['video_source']
+WINDOW_NAME = user_parameters['window_name']
+WRITE_VIDEO_OUTPUT = user_parameters['write_video_output']
 
 ##################################
 # Video and Queue I/O Parameters #
 ##################################
-VIDEO_W, VIDEO_H = 640, 480 
-FRAME_QUEUE_MAX_SIZE = 3       
+VIDEO_W, VIDEO_H = 640, 480
+FRAME_QUEUE_MAX_SIZE = 3
 QUEUE_WAIT_TIME = 4
+# VIDEO_SOURCE = 0
+WEIGHT_PATH = './Openpose/model/pose_model.pth.tar'
 
 LOGGING_LEVEL = logging.INFO
 logging.basicConfig(
@@ -21,6 +33,7 @@ logging.basicConfig(
                 '%(levelname)s - %(message)s'),
         )
 logger = logging.getLogger(__name__)
+
 
 class FrameReader(threading.Thread):
     """ Thread to read frame from webcam.
@@ -36,7 +49,7 @@ class FrameReader(threading.Thread):
     def run(self):
         count = 0
         while self.run_flag:
-            start_time = time.time()
+            # start_time = time.time()
             count += 1
             ret, frame = self.cap.read()
             if frame is None:
@@ -50,35 +63,37 @@ class FrameReader(threading.Thread):
 
             frame = cv2.resize(frame, (VIDEO_W, VIDEO_H))
             self.frame_queue.put(frame)
-            #logger.info("Frame read: {} s".format(time.time() - start_time))
+            # logger.info("Frame read: {} s".format(time.time() - start_time))
 
     def stop(self):
         self.run_flag = False
+
 
 class PoseEstimator(threading.Thread):
     """ Thread to return pose estimation result(heatmap and part affinity field).
     Need to be stopped by calling stop() in IdentifyAndDisplayer."""
 
-    def __init__(self, frame_queue, heatmap_queue, paf_queue):
+    def __init__(self, frame_queue, heatmap_queue, paf_queue, weight_path):
         super(PoseEstimator, self).__init__()
         self.frame_queue = frame_queue
         self.heatmap_queue = heatmap_queue
         self.paf_queue = paf_queue
         self.run_flag = True
         # pose estimation
-        self.hp_generator = HeatmapPafGenerator('./model/pose_model.pth.tar')
+        self.hp_generator = \
+            demo_lib.HeatmapPafGenerator(weight_path)
         self.param_, self.model_ = self.hp_generator.get_configs()
 
     def put_results_to_queue(self, frame):
         heatmap_avg, paf_avg = self.hp_generator(frame)
 
         heatmap_results = {
-            'param_':self.param_,
-            'heatmap_avg':heatmap_avg
+            'param_': self.param_,
+            'heatmap_avg': heatmap_avg
         }
         paf_results = {
-            'frame':frame,
-            'paf_avg':paf_avg
+            'frame': frame,
+            'paf_avg': paf_avg
         }
         # print ("heatmap queue size",self.heatmap_queue.qsize())
         # print ("paf queue size",self.heatmap_queue.qsize())
@@ -88,52 +103,20 @@ class PoseEstimator(threading.Thread):
 
         self.heatmap_queue.put(heatmap_results)
         self.paf_queue.put(paf_results)
-        
+   
     def run(self):
         while self.run_flag:
             start_time = time.time()
             frame = self.frame_queue.get(timeout=QUEUE_WAIT_TIME)
             self.put_results_to_queue(frame)
-            logger.info("Pose Estimation: {} s".format(time.time() - start_time))
-    
+            logger.info(
+                "Pose Estimation: {} s".format(time.time() - start_time)
+            )
+
     def stop(self):
         self.run_flag = False
-'''
-class PeakCounter(threading.Thread):
-    def __init__(self, heatmap_queue, all_peaks_queue):
-        super(PeakCounter, self).__init__()
-        self.heatmap_queue = heatmap_queue
-        self.all_peaks_queue = all_peaks_queue
-        self.run_flag = True
-        # self.gfcp = GaussianFilterAndCountPeak()
 
-    def put_peaks_to_queue(self, heatmap_results):
-        param_ = heatmap_results['param_']
-        heatmap_avg = heatmap_results['heatmap_avg']
-        # Call function in JH_pose_demo
-        all_peaks = count_peak(heatmap_avg, param_)
-        # all_peaks = self.gfcp(heatmap_avg, param_)
-        peak_results = {
-            'all_peaks':all_peaks,
-            'param_':param_
-        }
-        self.all_peaks_queue.put(peak_results)
-        
-    def run(self):
-        while self.run_flag:
-            try:
-                heatmap_results = self.heatmap_queue.get(timeout=QUEUE_WAIT_TIME)    
-            except Empty:
-                continue
 
-            start_time = time.time()
-            self.put_peaks_to_queue(heatmap_results)
-            logger.info("Peak Count: {} s".format(time.time() - start_time))
-    
-            
-    def stop(self):
-        self.run_flag = False
-'''
 class GaussianFilter(threading.Thread):
     def __init__(self, heatmap_queue, filter_queue):
         super(GaussianFilter, self).__init__()
@@ -144,27 +127,31 @@ class GaussianFilter(threading.Thread):
     def put_filtering_result_to_queue(self, heatmap_results):
         heatmap_avg = heatmap_results['heatmap_avg']
         param_ = heatmap_results['param_']
-        gaussian_heatmap = gaussian_filtering(heatmap_avg)
+        gaussian_heatmap = demo_lib.gaussian_filtering(heatmap_avg)
         filtering_results = {
-            'heatmap_avg':heatmap_avg,
-            'gaussian_heatmap':gaussian_heatmap,
-            'param_':param_
+            'heatmap_avg': heatmap_avg,
+            'gaussian_heatmap': gaussian_heatmap,
+            'param_': param_
         }
         self.filter_queue.put(filtering_results)
-    
+
     def run(self):
         while self.run_flag:
             try:
-                heatmap_results = self.heatmap_queue.get(timeout=QUEUE_WAIT_TIME)    
+                heatmap_results = \
+                    self.heatmap_queue.get(timeout=QUEUE_WAIT_TIME)    
             except Empty:
                 continue
 
             start_time = time.time()
             self.put_filtering_result_to_queue(heatmap_results)
-            logger.info("Gaussian Filtering: {} s".format(time.time() - start_time))
+            logger.info(
+                "Gaussian Filtering: {} s".format(time.time() - start_time)
+            )
 
     def stop(self):
         self.run_flag = False
+
 
 class PeakCounter(threading.Thread):
     def __init__(self, filter_queue, all_peaks_queue):
@@ -179,26 +166,25 @@ class PeakCounter(threading.Thread):
         heatmap_avg = filter_results['heatmap_avg']
         gaussian_heatmap = filter_results['gaussian_heatmap']
         # Call function in JH_pose_demo
-        all_peaks = count_peak(heatmap_avg, gaussian_heatmap, param_)
+        all_peaks = demo_lib.count_peak(heatmap_avg, gaussian_heatmap, param_)
         # all_peaks = self.gfcp(heatmap_avg, param_)
         peak_results = {
-            'all_peaks':all_peaks,
-            'param_':param_
+            'all_peaks': all_peaks,
+            'param_': param_
         }
         self.all_peaks_queue.put(peak_results)
-        
+
     def run(self):
         while self.run_flag:
             try:
-                filter_results = self.filter_queue.get(timeout=QUEUE_WAIT_TIME)    
+                filter_results = self.filter_queue.get(timeout=QUEUE_WAIT_TIME)
             except Empty:
                 continue
 
             start_time = time.time()
             self.put_peaks_to_queue(filter_results)
             logger.info("Peak Count: {} s".format(time.time() - start_time))
-    
-            
+
     def stop(self):
         self.run_flag = False
 
@@ -208,7 +194,7 @@ class connected_visualizer(threading.Thread):
         super(connected_visualizer, self).__init__()
         self.all_peaks_queue = all_peaks_queue
         self.paf_queue = paf_queue
-        self.CnV = ConnectAndVisualize()
+        self.CnV = demo_lib.ConnectAndVisualize()
         self.threadManager = threadManager
         self.run_flag = True
 
@@ -218,20 +204,22 @@ class connected_visualizer(threading.Thread):
         frame = paf_results['frame']
         paf_avg = paf_results['paf_avg']
         canvas = self.CnV(paf_avg, all_peaks, frame, param_)
+
         return canvas
 
     def run(self):
-         while self.run_flag:
-            cv2.namedWindow('UmboCV Demo', cv2.WINDOW_NORMAL)
-            cv2.resizeWindow('UmboCV Demo', VIDEO_W, VIDEO_H)
-            
+        cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(WINDOW_NAME, VIDEO_W*2, VIDEO_H*2)
+
+        while self.run_flag:
             start_time_fps = time.time()
             if cv2.waitKey(25) & 0xFF == ord('q'):
                 self.threadManager.stop()
 
             try:
-                peak_results = self.all_peaks_queue.get(timeout=QUEUE_WAIT_TIME)
-                paf_results = self.paf_queue.get(timeout=QUEUE_WAIT_TIME)    
+                peak_results = \
+                    self.all_peaks_queue.get(timeout=QUEUE_WAIT_TIME)
+                paf_results = self.paf_queue.get(timeout=QUEUE_WAIT_TIME) 
             except Empty:
                 continue
 
@@ -239,10 +227,11 @@ class connected_visualizer(threading.Thread):
             fps = "FPS: {:.1f}".format(1.0 / (time.time()-start_time_fps))
             cv2.putText(canvas, fps, (30, 30),
                         cv2.FONT_HERSHEY_COMPLEX_SMALL, 1, 1)
-            cv2.imshow('UmboCV Demo', canvas)
+            cv2.imshow(WINDOW_NAME, canvas)
 
     def stop(self):
         self.run_flag = False
+
 
 class PoseEstimationDemo():
     """ Provides main class for instance segmentation demo.
@@ -256,7 +245,7 @@ class PoseEstimationDemo():
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, VIDEO_W)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, VIDEO_H)
 
-        if video_source != 0 and video_source != 1:
+        if video_source not in [0, 1]:
             self.frame_queue_maxsize = 0
 
         self.frame_queue = Queue(maxsize=self.frame_queue_maxsize)
@@ -268,7 +257,10 @@ class PoseEstimationDemo():
 
         self.frameReader = FrameReader(self.cap, self.frame_queue, self)
         self.pose_esimator = PoseEstimator(
-            self.frame_queue, self.heatmap_queue, self.paf_queue
+            self.frame_queue, 
+            self.heatmap_queue,
+            self.paf_queue,
+            weight_path=WEIGHT_PATH
         )
         self.gaussianfilter = GaussianFilter(
             self.heatmap_queue, self.filter_queue
@@ -282,6 +274,7 @@ class PoseEstimationDemo():
         self.connect_displayer = connected_visualizer(
             self.all_peaks_queue, self.paf_queue, self
         )
+
     def run(self):
         logger.debug("Threads started")
         self.frameReader.start()
@@ -291,30 +284,30 @@ class PoseEstimationDemo():
         self.connect_displayer.start()
         # self.displayer.start()
 
-        self.frameReader.join()
-        self.pose_esimator.join()
-        self.gaussianfilter.join()
-        self.peak_counter.join()
         self.connect_displayer.join()
+        self.peak_counter.join()
+        self.gaussianfilter.join()
+        self.pose_esimator.join()
+        self.frameReader.join()
         # self.displayer.join()
         logger.debug("Threads ended")
 
         self.cap.release()
         cv2.destroyAllWindows()
         logger.info("End of video")
-    
+
     def stop(self):
-        # self.displayer.stop()
         self.connect_displayer.stop()
         self.peak_counter.stop()
-        # self.gaussianfilter.stop()
+        self.gaussianfilter.stop()
         self.pose_esimator.stop()
         self.frameReader.stop()
+
 
 if __name__ == "__main__":
     logger.info("Welcome to UmboCV pose estimation demo!")
     logger.info("Press q to exit.")
-    demo = PoseEstimationDemo(video_source=0)
+    demo = PoseEstimationDemo(video_source=VIDEO_SOURCE)
     demo.run()
 
 
