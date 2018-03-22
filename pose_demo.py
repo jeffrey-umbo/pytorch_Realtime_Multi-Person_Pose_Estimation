@@ -1,5 +1,7 @@
 import cv2
+import os
 import time
+from time import gmtime, strftime
 import demo_library as demo_lib
 import threading
 import logging
@@ -16,6 +18,7 @@ with open("./configure.yml", 'r') as stream:
 VIDEO_SOURCE = user_parameters['video_source']
 WINDOW_NAME = user_parameters['window_name']
 WRITE_VIDEO_OUTPUT = user_parameters['write_video_output']
+VIDEO_FPS = user_parameters['video_fps']
 
 ##################################
 # Video and Queue I/O Parameters #
@@ -25,6 +28,20 @@ FRAME_QUEUE_MAX_SIZE = 3
 QUEUE_WAIT_TIME = 4
 # VIDEO_SOURCE = 0
 WEIGHT_PATH = './Openpose/model/pose_model.pth.tar'
+
+if WRITE_VIDEO_OUTPUT:
+    # Create directories for output if not exists
+    output_dir = './outputs/'
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    if VIDEO_SOURCE in [0, 1]:
+        current_time = strftime("%Y%m%d_%H%M", gmtime())
+        VIDEO_OUTPUT_FILENAME = ('{}/{}_pose_demo.mp4'
+                                 .format(output_dir, current_time))
+    else:
+        VIDEO_OUTPUT_FILENAME = (output_dir
+                                 + VIDEO_SOURCE.split('.')[0]
+                                 + '_out.mp4')
 
 LOGGING_LEVEL = logging.INFO
 logging.basicConfig(
@@ -198,6 +215,12 @@ class connected_visualizer(threading.Thread):
         self.threadManager = threadManager
         self.run_flag = True
 
+        if WRITE_VIDEO_OUTPUT:
+            fourcc = cv2.VideoWriter_fourcc(*'X264')
+            self.video_out = cv2.VideoWriter(VIDEO_OUTPUT_FILENAME,
+                                             fourcc, VIDEO_FPS,
+                                             (VIDEO_W, VIDEO_H))
+
     def draw_canvas(self, peak_results, paf_results):
         all_peaks = peak_results['all_peaks']
         param_ = peak_results['param_']
@@ -228,6 +251,15 @@ class connected_visualizer(threading.Thread):
             cv2.putText(canvas, fps, (30, 30),
                         cv2.FONT_HERSHEY_COMPLEX_SMALL, 1, 1)
             cv2.imshow(WINDOW_NAME, canvas)
+
+            if WRITE_VIDEO_OUTPUT:
+                self.video_out.write(canvas)
+
+        if WRITE_VIDEO_OUTPUT:
+            logger.info(
+                "Output: {} written.".format(VIDEO_OUTPUT_FILENAME)
+            )
+            self.video_out.release()
 
     def stop(self):
         self.run_flag = False
@@ -268,9 +300,6 @@ class PoseEstimationDemo():
         self.peak_counter = PeakCounter(
             self.filter_queue, self.all_peaks_queue
         )
-        # self.peak_counter = PeakCounter(
-        #     self.heatmap_queue, self.all_peaks_queue
-        # )
         self.connect_displayer = connected_visualizer(
             self.all_peaks_queue, self.paf_queue, self
         )

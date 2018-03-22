@@ -120,10 +120,10 @@ class ConnectAndVisualize():
                             )
 
                         vec_x = np.array(
-                            [score_mid
-                                [int(round(startend[I][1])), 
-                                 int(round(startend[I][0])), 0]
-                                 for I in range(len(startend))]
+                            [score_mid[
+                                int(round(startend[I][1])), 
+                                int(round(startend[I][0])), 0]
+                                for I in range(len(startend))]
                         )
                         vec_y = np.array([
                             score_mid[
@@ -132,17 +132,18 @@ class ConnectAndVisualize():
                                 for I in range(len(startend))
                         ])
 
-                        score_midpts = \
-                            np.multiply(vec_x, vec[0]) + np.multiply(vec_y, vec[1])
+                        score_midpts = np.multiply(vec_x, vec[0]) + \
+                                       np.multiply(vec_y, vec[1])
                         if not norm == 0:
                             score_with_dist_prior = \
-                                sum(score_midpts)/len(score_midpts) \
-                                + min(0.5*VIDEO_W/norm-1, 0)
+                                sum(score_midpts)/len(score_midpts) + \
+                                min(0.5*VIDEO_W/norm-1, 0)
                         else:
                             score_with_dist_prior = \
                                 sum(score_midpts)/len(score_midpts)
 
                         criterion1 = len(np.nonzero(score_midpts > self.param_['thre2'])[0]) > 0.8 * len(score_midpts)
+
                         criterion2 = score_with_dist_prior > 0
                         if criterion1 and criterion2:
                             connection_candidate.append(
@@ -158,8 +159,10 @@ class ConnectAndVisualize():
                 connection = np.zeros((0, 5))
                 for c in range(len(connection_candidate)):
                     i, j, s = connection_candidate[c][0:3]
-                    if(i not in connection[:,3] and j not in connection[:,4]):
-                        connection = np.vstack([connection, [candA[i][3], candB[j][3], s, i, j]])
+                    if(i not in connection[:, 3] and j not in connection[:, 4]):
+                        connection = np.vstack(
+                            [connection, [candA[i][3], candB[j][3], s, i, j]]
+                        )
                         if(len(connection) >= min(nA, nB)):
                             break
 
@@ -274,14 +277,27 @@ class ConnectAndVisualize():
                     try:
                         x = (all_peaks[i][j][0:2],all_peaks[11][j][0:2])
                         point = [sum(y) / len(y) for y in zip(*x)]
-                        cv2.circle(canvas, tuple(point), 2, self.colors[i], thickness=-1)
+                        cv2.circle(
+                            canvas, tuple(point), 2, self.colors[i], thickness=-1
+                        )
                         continue
                     except:
-                        cv2.circle(canvas, all_peaks[i][j][0:2], 2, self.colors[i], thickness=-1)
+                        cv2.circle(
+                            canvas, 
+                            all_peaks[i][j][0:2], 
+                            2,
+                            self.colors[i], 
+                            thickness=-1
+                        )
                 if i == 11:
                     continue
 
-                cv2.circle(canvas, all_peaks[i][j][0:2], 2, self.colors[i], thickness=-1)
+                cv2.circle(
+                    canvas,
+                    all_peaks[i][j][0:2],
+                    2, self.colors[i],
+                    thickness=-1
+                )
 
         return canvas
     
@@ -458,7 +474,7 @@ class HeatmapPafGenerator():
 
 # pose model
 class pose_model(nn.Module):
-    def __init__(self,model_dict,transform_input=False):
+    def __init__(self, model_dict, transform_input=False):
         super(pose_model, self).__init__()
         self.model0 = model_dict['block0']
         self.model1_1 = model_dict['block1_1']        
